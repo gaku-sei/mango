@@ -93,7 +93,10 @@
   (valid [this document])
   (valid? [this document]))
 
-(defrecord Collection [name attributes validations]
+(defprotocol Buildable
+  (build [this document]))
+
+(defrecord Collection [name attributes types validations]
   Searchable
   (all [this] (find this {}))
   (find [this conds] (monger/find-maps name conds))
@@ -107,11 +110,11 @@
   ;add :created_at and :updated_at keys?
   (save [this document]
     (if (get document :_id)
-      (monger/save-and-return name (select-keys document attributes))
-      (insert this (select-keys document attributes))))
-  (insert [this document] (monger/insert-and-return name (select-keys document attributes)))
-  (update [this conds document] (monger/update name conds (select-keys document attributes)))
-  (update-by-id [this id document] (monger/update-by-id name (to-object-id id) (select-keys document attributes)))
+      (monger/save-and-return name (build this document))
+      (insert this (build this document))))
+  (insert [this document] (monger/insert-and-return name (build this document)))
+  (update [this conds document] (monger/update name conds (build this document)))
+  (update-by-id [this id document] (monger/update-by-id name (to-object-id id) (build this document)))
 
   Deletable
   (delete-all [this] (monger/remove name))
@@ -120,26 +123,41 @@
 
   Validable
   (valid [this document] ((apply validateur/validation-set validations) document))
-  (valid? [this document] (empty? (valid this document))))
+  (valid? [this document] (empty? (valid this document)))
 
-(defn- collection
-  "Returns a hash map with :attributes and :validations"
-  [constraints]
-  (hash-map
-    :attributes (cons :_id (keys constraints))
-    :validations (for [[attr validations] constraints
-                       validation validations]
-                   (condp apply [validation]
-                     vector? ((apply ((core-first validation) *validateurs*) (rest validation)) attr)
-                     keyword? (((validation *validateurs*)) attr)))))
+  Buildable
+  ;be smarter:
+  (build [this document]
+    (let [document (select-keys document attributes)]
+      (reduce (fn [agg [attribute value]]
+        (if-let [type (types attribute)]
+          (let [value (case type
+                          Boolean (if (= value "true") true false)
+                          Long (Long/parseLong value)
+                          Integer (Integer/parseInt value)
+                          Float (Float/parseFloat value)
+                          Double (Double/parseDouble value)
+                          String value)]
+            (assoc agg attribute value))
+          (assoc agg attribute value))) {} document))))
 
 (defmacro defcollection
   "Defines a new Collection.
   (defcollection users
     (username [:length-within 6 255])
     (password [:length-within 6 255])
-    (email :email [:length-within 6 255]))"
+    (email :email [:length-within 6 255])
+    (^Boolean admin?))"
   [name & constraints]
-  (let [{:keys [attributes validations]}
-        (collection (reduce (fn [agg [attr & vs]] (conj agg [(keyword attr) vs])) {} constraints))]
-    `(def ~name (Collection. ~(str name) '~attributes '~validations))))
+  (letfn [(collection [constraints]
+            {:attributes (cons :_id (keys constraints))
+             :validations (for [[attr validations] constraints
+                                validation validations]
+                            (condp apply [validation]
+                              vector? ((apply ((core-first validation) *validateurs*) (rest validation)) attr)
+                              keyword? (((validation *validateurs*)) attr)))})]
+    `(let [{attributes# :attributes validations# :validations}
+           ('~collection (reduce (fn [agg# [attr# & vs#]] (assoc agg# (keyword attr#) vs#)) {} '~constraints))
+           ;be smarter:
+           types# (apply merge {} (map (juxt keyword (comp :tag meta)) (filter (comp :tag meta) (map core-first '~constraints))))]
+       (def ~name (Collection. ~(str name) attributes# types# validations#)))))
