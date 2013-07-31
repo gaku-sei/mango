@@ -61,7 +61,7 @@
 (defmacro with-validateurs
   "Rebings easily the *validateur* variable.
   (with-validateurs {:foo validateur-function}
-    (valid? collection document))"
+    (defcollection bar (attr :foo)))"
   [validateurs & body]
   `(binding [*validateurs* (merge *validateurs* ~validateurs)]
      ~@body))
@@ -98,20 +98,20 @@
   (all [this] (find this {}))
   (find [this conds] (monger/find-maps name conds))
   (find-one [this conds] (monger/find-one-as-map name conds))
-  (find-by-id [this id] (monger/find-map-by-id name id))
+  (find-by-id [this id] (monger/find-map-by-id name (to-object-id id)))
   (first [this] (find-one this {}))
   (count-all [this] (monger/count name))
   (count [this conds] (monger/count name conds))
 
   Writable
-  ;add :created_at and :updated_at keys
+  ;add :created_at and :updated_at keys?
   (save [this document]
     (if (get document :_id)
-      (monger/save-and-return name document)
-      (insert this document)))
-  (insert [this document] (monger/insert-and-return name document))
-  (update [this conds document] (monger/update name conds document))
-  (update-by-id [this id document] (monger/update-by-id name (to-object-id id) document))
+      (monger/save-and-return name (select-keys document attributes))
+      (insert this (select-keys document attributes))))
+  (insert [this document] (monger/insert-and-return name (select-keys document attributes)))
+  (update [this conds document] (monger/update name conds (select-keys document attributes)))
+  (update-by-id [this id document] (monger/update-by-id name (to-object-id id) (select-keys document attributes)))
 
   Deletable
   (delete-all [this] (monger/remove name))
@@ -126,7 +126,7 @@
   "Returns a hash map with :attributes and :validations"
   [constraints]
   (hash-map
-    :attributes (keys constraints)
+    :attributes (cons :_id (keys constraints))
     :validations (for [[attr validations] constraints
                        validation validations]
                    (condp apply [validation]

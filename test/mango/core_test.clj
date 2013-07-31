@@ -20,6 +20,8 @@
          (:name users) "users"
          (sort (:attributes users)) (sort [:username :password :email :website]))
     (is (valid? users valid-user))))
+    ;(are [x] ((complement valid?) users x)
+    ;     bad-users)
 
 (drop-db)
 (disconnect!)

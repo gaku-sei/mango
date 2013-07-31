@@ -1,4 +1,4 @@
-(defproject mango "0.1.0"
+(defproject mango "0.1.1"
   :description ""
   :url ""
   :license {:name "Eclipse Public License"
